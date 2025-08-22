@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Учет выработки</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        input, select, button {
+            padding: 10px;
+            margin: 10px 0;
+            width: 100%;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        button {
+            background: #0088cc;
+            color: white;
+            border: none;
+        }
+        button:hover {
+            background: #0066aa;
+        }
+        .hidden {
+            display: none;
+        }
+        .list {
+            margin: 10px 0;
+        }
+        .item {
+            padding: 10px;
+            background: #f9f9f9;
+            margin: 5px 0;
+            border-radius: 5px;
+            border-left: 4px solid #0088cc;
+        }
+    </style>
+</head>
+<body>
+    <div class="container" id="loginScreen">
+        <h2>Вход</h2>
+        <input type="text" id="nameInput" placeholder="Ваше имя" />
+        <input type="password" id="pinInput" placeholder="Пин-код" />
+        <button onclick="login()">Войти</button>
+    </div>
+
+    <div class="container hidden" id="workerScreen">
+        <h2>Запись выработки</h2>
+        <p>Привет, <span id="workerName"></span>!</p>
+        <select id="jobSelect"></select>
+        <input type="number" id="quantityInput" placeholder="Количество" />
+        <button onclick="record()">Записать</button>
+        <button onclick="showStats()">Посмотреть статистику</button>
+    </div>
+
+    <div class="container hidden" id="adminScreen">
+        <h2>Админ-панель</h2>
+        <button onclick="showAdminStats()">Статистика по всем</button>
+        <button onclick="showAddJob()">Добавить вид работы</button>
+        <button onclick="showUsers()">Управление пользователями</button>
+    </div>
+
+    <div class="container hidden" id="statsScreen">
+        <h2>Статистика</h2>
+        <input type="date" id="startInput" />
+        <input type="date" id="endInput" />
+        <button onclick="loadStats()">Загрузить</button>
+        <div id="statsList" class="list"></div>
+        <button onclick="back()">Назад</button>
+    </div>
+
+    <div class="container hidden" id="addJobScreen">
+        <h2>Добавить работу</h2>
+        <input type="text" id="newJobName" placeholder="Название работы" />
+        <input type="number" id="newJobRate" placeholder="Ставка (часы)" step="0.01" />
+        <button onclick="addJob()">Добавить</button>
+        <button onclick="back()">Назад</button>
+    </div>
+
+    <script>
+        const API = "/api";
+        let currentUser = null;
+
+        // Загружаем виды работ
+        async function loadJobs() {
+            const res = await fetch(API + "/jobs");
+            const jobs = await res.json();
+            const select = document.getElementById("jobSelect");
+            select.innerHTML = "";
+            jobs.forEach(job => {
+                const opt = document.createElement("option");
+                opt.value = job.id;
+                opt.textContent = `${job.name} (×${job.rate})`;
+                select.appendChild(opt);
+            });
+        }
+
+        // Вход
+        async function login() {
+            const name = document.getElementById("nameInput").value;
+            const pin = document.getElementById("pinInput").value;
+
+            const res = await fetch(API + "/login", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ name, pin })
+            });
+            const data = await res.json();
+
+            if (data.success) {
+                currentUser = data.user;
+                document.getElementById("workerName").textContent = currentUser.name;
+                document.getElementById("loginScreen").classList.add("hidden");
+                document.getElementById("workerScreen").classList.remove("hidden");
+                if (currentUser.is_admin) {
+                    document.getElementById("adminScreen").classList.remove("hidden");
+                }
+                loadJobs();
+            } else {
+                alert(data.message);
+            }
+        }
+
+        // Запись
+        async function record() {
+            const job_id = document.getElementById("jobSelect").value;
+            const quantity = document.getElementById("quantityInput").value;
+
+            await fetch(API + "/record", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    user_id: currentUser.id,
+                    job_id: job_id,
+                    quantity: parseInt(quantity)
+                })
+            });
+            alert("Записано!");
+            document.getElementById("quantityInput").value = "";
+        }
+
+        // Показать статистику
+        function showStats() {
+            document.getElementById("workerScreen").classList.add("hidden");
+            document.getElementById("statsScreen").classList.remove("hidden");
+            document.getElementById("startInput").value = "";
+            document.getElementById("endInput").value = "";
+            document.getElementById("statsList").innerHTML = "";
+        }
+
+        // Загрузить статистику
+        async function loadStats() {
+            const start = document.getElementById("startInput").value;
+            const end = document.getElementById("endInput").value;
+            let url = `${API}/stats?`;
+            if (!currentUser.is_admin) {
+                url += `user_id=${currentUser.id}&`;
+            }
+            if (start) url += `start=${start}T00:00:00&`;
+            if (end) url += `end=${end}T23:59:59`;
+
+            const res = await fetch(url);
+            const stats = await res.json();
+            const list = document.getElementById("statsList");
+            list.innerHTML = "";
+            if (stats.length === 0) {
+                list.innerHTML = "<p>Нет данных</p>";
+                return;
+            }
+            stats.forEach(s => {
+                const div = document.createElement("div");
+                div.className = "item";
+                div.textContent = `${s.job} × ${s.quantity} = ${(s.rate * s.quantity).toFixed(2)} ч (${s.timestamp})`;
+                list.appendChild(div);
+            });
+        }
+
+        // Админ: статистика
+        function showAdminStats() {
+            showStats(); // используем тот же экран
+        }
+
+        // Показать добавление работы
+        function showAddJob() {
+            document.getElementById("workerScreen").classList.add("hidden");
+            document.getElementById("adminScreen").classList.add("hidden");
+            document.getElementById("addJobScreen").classList.remove("hidden");
+        }
+
+        // Добавить работу
+        async function addJob() {
+            const name = document.getElementById("newJobName").value;
+            const rate = document.getElementById("newJobRate").value;
+
+            const res = await fetch(API + "/add_job", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ name, rate: parseFloat(rate) })
+            });
+            const data = await res.json();
+            if (data.success) {
+                alert("Работа добавлена!");
+                document.getElementById("newJobName").value = "";
+                document.getElementById("newJobRate").value = "";
+                loadJobs(); // обновить список
+            } else {
+                alert(data.message);
+            }
+        }
+
+        // Назад
+        function back() {
+            document.getElementById("statsScreen").classList.add("hidden");
+            document.getElementById("addJobScreen").classList.add("hidden");
+            document.getElementById("workerScreen").classList.remove("hidden");
+            if (currentUser.is_admin) {
+                document.getElementById("adminScreen").classList.remove("hidden");
+            }
+        }
+
+        // Инициализация
+        Telegram.WebApp.ready();
+    </script>
+</body>
+</html>
