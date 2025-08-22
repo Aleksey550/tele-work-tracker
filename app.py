@@ -1,18 +1,23 @@
-from flask import Flask, request, jsonify, send_from_directory
-from flask_cors import CORS
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 import sqlite3
 import os
 import datetime
 
-app = Flask(__name__, static_folder='static')
-CORS(app)  # Разрешаем запросы с фронтенда
+app = FastAPI()
 
-DATABASE = 'data.db'
+# Монтируем статику: /static → папка static
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Создаем базу данных и таблицы при запуске
+# Указываем путь к базе
+DATABASE = "data.db"
+
 def init_db():
+    """Создаёт таблицы и заполняет начальные данные"""
     with sqlite3.connect(DATABASE) as conn:
         c = conn.cursor()
+        
         # Пользователи
         c.execute('''CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY,
@@ -39,16 +44,14 @@ def init_db():
             FOREIGN KEY (job_id) REFERENCES jobs (id)
         )''')
 
-        # Добавим тестовых пользователей
+        # Добавляем тестовых пользователей (если ещё нет)
         try:
-            c.execute("INSERT INTO users (name, pin, is_admin) VALUES (?, ?, ?)",
-                      ("Иван", "1234", 0))
-            c.execute("INSERT INTO users (name, pin, is_admin) VALUES (?, ?, ?)",
-                      ("Админ", "0000", 1))
+            c.execute("INSERT OR IGNORE INTO users (name, pin, is_admin) VALUES (?, ?, ?)", ("Иван", "1234", 0))
+            c.execute("INSERT OR IGNORE INTO users (name, pin, is_admin) VALUES (?, ?, ?)", ("Админ", "0000", 1))
         except:
-            pass  # Уже есть
+            pass
 
-        # Добавим виды работ
+        # Виды работ
         jobs = [
             ("Нарезка поролона для планок подголовника", 0.02),
             ("Нарезка поролона для декоративных планок подголовника", 0.02),
@@ -75,23 +78,18 @@ def init_db():
         ]
         for name, rate in jobs:
             try:
-                c.execute("INSERT INTO jobs (name, rate) VALUES (?, ?)", (name, rate))
+                c.execute("INSERT OR IGNORE INTO jobs (name, rate) VALUES (?, ?)", (name, rate))
             except:
-                pass  # Уже есть
-
+                pass
         conn.commit()
-
-# Запускаем базу при старте
-init_db()
 
 # === API маршруты ===
 
-# Вход пользователя
-@app.route('/api/login', methods=['POST'])
-def login():
-    data = request.json
-    name = data.get('name')
-    pin = data.get('pin')
+@app.post("/api/login")
+async def login(request: Request):
+    data = await request.json()
+    name = data.get("name")
+    pin = data.get("pin")
 
     with sqlite3.connect(DATABASE) as conn:
         c = conn.cursor()
@@ -99,57 +97,49 @@ def login():
         user = c.fetchone()
 
     if user:
-        return jsonify({"success": True, "user": {"id": user[0], "name": user[1], "is_admin": bool(user[2])}})
+        return {"success": True, "user": {"id": user[0], "name": user[1], "is_admin": bool(user[2])}}
     else:
-        return jsonify({"success": False, "message": "Неверное имя или пин-код"})
+        raise HTTPException(status_code=401, detail="Неверное имя или пин-код")
 
-# Получить все виды работ
-@app.route('/api/jobs', methods=['GET'])
-def get_jobs():
+@app.get("/api/jobs")
+async def get_jobs():
     with sqlite3.connect(DATABASE) as conn:
         c = conn.cursor()
         c.execute("SELECT id, name, rate FROM jobs")
         jobs = [{"id": row[0], "name": row[1], "rate": row[2]} for row in c.fetchall()]
-    return jsonify(jobs)
+    return jobs
 
-# Записать выработку
-@app.route('/api/record', methods=['POST'])
-def record_production():
-    data = request.json
-    user_id = data.get('user_id')
-    job_id = data.get('job_id')
-    quantity = data.get('quantity')
+@app.post("/api/record")
+async def record_production(request: Request):
+    data = await request.json()
+    user_id = data.get("user_id")
+    job_id = data.get("job_id")
+    quantity = data.get("quantity")
 
     with sqlite3.connect(DATABASE) as conn:
         c = conn.cursor()
         c.execute("INSERT INTO production (user_id, job_id, quantity, timestamp) VALUES (?, ?, ?, ?)",
                   (user_id, job_id, quantity, datetime.datetime.now()))
         conn.commit()
-    return jsonify({"success": True})
+    return {"success": True}
 
-# Получить статистику
-@app.route('/api/stats', methods=['GET'])
-def get_stats():
-    user_id = request.args.get('user_id')
-    start = request.args.get('start')
-    end = request.args.get('end')
-
+@app.get("/api/stats")
+async def get_stats(user_id: int = None, start: str = None, end: str = None):
     query = '''SELECT u.name, j.name, j.rate, p.quantity, p.timestamp
                FROM production p
                JOIN users u ON p.user_id = u.id
                JOIN jobs j ON p.job_id = j.id
                WHERE 1=1'''
     params = []
-
     if user_id:
         query += " AND p.user_id = ?"
         params.append(user_id)
     if start:
         query += " AND p.timestamp >= ?"
-        params.append(start)
+        params.append(f"{start}T00:00:00")
     if end:
         query += " AND p.timestamp <= ?"
-        params.append(end)
+        params.append(f"{end}T23:59:59")
 
     with sqlite3.connect(DATABASE) as conn:
         c = conn.cursor()
@@ -165,50 +155,27 @@ def get_stats():
             "quantity": row[3],
             "timestamp": row[4]
         })
-    return jsonify(stats)
+    return stats
 
-# Получить всех пользователей (для админа)
-@app.route('/api/users', methods=['GET'])
-def get_users():
+@app.get("/api/users")
+async def get_users():
     with sqlite3.connect(DATABASE) as conn:
         c = conn.cursor()
         c.execute("SELECT id, name, is_admin FROM users")
         users = [{"id": u[0], "name": u[1], "is_admin": bool(u[2])} for u in c.fetchall()]
-    return jsonify(users)
+    return users
 
-# Добавить работу (только для админа)
-@app.route('/api/add_job', methods=['POST'])
-def add_job():
-    data = request.json
-    name = data.get('name')
-    rate = data.get('rate')
+@app.get("/")
+async def index():
+    try:
+        with open("static/index.html", "r", encoding="utf-8") as f:
+            content = f.read()
+        return HTMLResponse(content=content)
+    except FileNotFoundError:
+        return HTMLResponse(content="<h1>Ошибка: index.html не найден</h1>", status_code=404)
 
-    with sqlite3.connect(DATABASE) as conn:
-        c = conn.cursor()
-        try:
-            c.execute("INSERT INTO jobs (name, rate) VALUES (?, ?)", (name, rate))
-            conn.commit()
-            return jsonify({"success": True})
-        except sqlite3.IntegrityError:
-            return jsonify({"success": False, "message": "Работа с таким названием уже есть"})
-
-# Удалить работу
-@app.route('/api/delete_job/<int:job_id>', methods=['DELETE'])
-def delete_job(job_id):
-    with sqlite3.connect(DATABASE) as conn:
-        c = conn.cursor()
-        c.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
-        if c.rowcount == 0:
-            return jsonify({"success": False, "message": "Работа не найдена"})
-        conn.commit()
-        return jsonify({"success": True})
-
-# Главная страница (Telegram Web App)
-@app.route('/')
-def index():
-    return send_from_directory('static', 'index.html')
-
-if __name__ == '__main__':
-    import os
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+# Запуск приложения
+if __name__ == "__main__":
+    init_db()  # Вызывается только при запуске через `python app.py`
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
