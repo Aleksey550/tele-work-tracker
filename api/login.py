@@ -9,6 +9,9 @@ def handler(request):
     name = data.get("name")
     pin = data.get("pin")
 
+    if not name or not pin:
+        return { "statusCode": 400, "body": {"success": False, "message": "Заполните все поля"} }
+
     with sqlite3.connect(DATABASE) as conn:
         c = conn.cursor()
         c.execute("SELECT id, name, is_admin FROM users WHERE name = ? AND pin = ?", (name, pin))

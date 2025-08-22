@@ -3,155 +3,330 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Учет выработки</title>
+    <title>Учёт выработки</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { font-family: Arial, sans-serif; padding: 20px; background: #f5f5f5; }
-        .container { max-width: 600px; margin: 0 auto; background: white; border-radius: 10px; padding: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        input, select, button { padding: 10px; margin: 10px 0; width: 100%; border: 1px solid #ddd; border-radius: 5px; }
-        button { background: #0088cc; color: white; border: none; }
-        button:hover { background: #0066aa; }
-        .hidden { display: none; }
-        .list { margin: 10px 0; }
-        .item { padding: 10px; background: #f9f9f9; margin: 5px 0; border-radius: 5px; border-left: 4px solid #0088cc; }
+        :root {
+            --primary: #0088cc;
+            --primary-dark: #0066aa;
+            --text: #333;
+            --bg: #f5f5f5;
+            --card: #ffffff;
+            --border: #ddd;
+        }
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        body {
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+            padding: 20px;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: var(--card);
+            border-radius: 15px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        .header {
+            background: var(--primary);
+            color: white;
+            padding: 20px;
+            text-align: center;
+            font-size: 1.5em;
+            font-weight: 600;
+        }
+        .screen {
+            padding: 20px;
+            display: none;
+        }
+        .screen.active {
+            display: block;
+        }
+        input, select, button {
+            padding: 14px;
+            margin: 10px 0;
+            width: 100%;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            font-size: 16px;
+        }
+        button {
+            background: var(--primary);
+            color: white;
+            border: none;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        button:hover {
+            background: var(--primary-dark);
+        }
+        .btn-back {
+            background: #6c757d !important;
+        }
+        .list {
+            margin: 20px 0;
+        }
+        .item {
+            padding: 15px;
+            background: #f9f9f9;
+            margin: 8px 0;
+            border-radius: 10px;
+            border-left: 5px solid var(--primary);
+        }
+        .chart-container {
+            position: relative;
+            height: 300px;
+            margin: 20px 0;
+        }
+        .footer {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+            font-size: 0.9em;
+        }
     </style>
 </head>
 <body>
-    <div class="container" id="loginScreen">
-        <h2>Вход</h2>
-        <input type="text" id="nameInput" placeholder="Ваше имя" />
-        <input type="password" id="pinInput" placeholder="Пин-код" />
-        <button onclick="login()">Войти</button>
-    </div>
+    <div class="container">
+        <div class="header">Учёт выработки</div>
 
-    <div class="container hidden" id="workerScreen">
-        <h2>Запись выработки</h2>
-        <p>Привет, <span id="workerName"></span>!</p>
-        <select id="jobSelect"></select>
-        <input type="number" id="quantityInput" placeholder="Количество" />
-        <button onclick="record()">Записать</button>
-        <button onclick="showStats()">Посмотреть статистику</button>
-    </div>
+        <!-- Экран входа -->
+        <div id="loginScreen" class="screen active">
+            <input type="text" id="nameInput" placeholder="Ваше имя" />
+            <input type="password" id="pinInput" placeholder="Пин-код" />
+            <button onclick="login()">Войти</button>
+        </div>
 
-    <div class="container hidden" id="adminScreen">
-        <h2>Админ-панель</h2>
-        <button onclick="showAdminStats()">Статистика по всем</button>
-        <button onclick="showUsers()">Управление пользователями</button>
-    </div>
+        <!-- Основной экран -->
+        <div id="workerScreen" class="screen">
+            <p><strong>Привет, <span id="workerName"></span>!</strong></p>
+            <select id="jobSelect"></select>
+            <input type="number" id="quantityInput" placeholder="Количество" />
+            <button onclick="record()">Записать выработку</button>
+            <button onclick="showStats()">Посмотреть статистику</button>
+            <div id="adminButtons" class="hidden">
+                <button onclick="showAdminStats()">Статистика по всем</button>
+                <button onclick="showUsers()">Управление пользователями</button>
+            </div>
+        </div>
 
-    <div class="container hidden" id="statsScreen">
-        <h2>Статистика</h2>
-        <input type="date" id="startInput" />
-        <input type="date" id="endInput" />
-        <button onclick="loadStats()">Загрузить</button>
-        <div id="statsList" class="list"></div>
-        <button onclick="back()">Назад</button>
+        <!-- Экран статистики -->
+        <div id="statsScreen" class="screen">
+            <input type="date" id="startInput" />
+            <input type="date" id="endInput" />
+            <button onclick="loadStats()">Показать статистику</button>
+            <div class="chart-container">
+                <canvas id="statsChart"></canvas>
+            </div>
+            <div id="statsList" class="list"></div>
+            <button onclick="back()" class="btn-back">Назад</button>
+        </div>
+
+        <div class="footer">
+            &copy; 2025 Учёт выработки
+        </div>
     </div>
 
     <script>
         const API = "/api";
         let currentUser = null;
+        let statsChart = null;
 
+        // Загружаем виды работ
         async function loadJobs() {
-            const res = await fetch(API + "/jobs");
-            const jobs = await res.json();
-            const select = document.getElementById("jobSelect");
-            select.innerHTML = "";
-            jobs.forEach(job => {
-                const opt = document.createElement("option");
-                opt.value = job.id;
-                opt.textContent = `${job.name} (×${job.rate})`;
-                select.appendChild(opt);
-            });
-        }
-
-        async function login() {
-            const name = document.getElementById("nameInput").value;
-            const pin = document.getElementById("pinInput").value;
-
-            const res = await fetch(API + "/login", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ name, pin })
-            });
-            const data = await res.json();
-
-            if (data.success) {
-                currentUser = data.user;
-                document.getElementById("workerName").textContent = currentUser.name;
-                document.getElementById("loginScreen").classList.add("hidden");
-                document.getElementById("workerScreen").classList.remove("hidden");
-                if (currentUser.is_admin) {
-                    document.getElementById("adminScreen").classList.remove("hidden");
-                }
-                loadJobs();
-            } else {
-                alert(data.message || "Ошибка входа");
+            try {
+                const res = await fetch(API + "/jobs");
+                const jobs = await res.json();
+                const select = document.getElementById("jobSelect");
+                select.innerHTML = "<option value=''>Выберите работу</option>";
+                jobs.forEach(job => {
+                    const opt = document.createElement("option");
+                    opt.value = job.id;
+                    opt.textContent = `${job.name} (${job.rate} ч)`;
+                    select.appendChild(opt);
+                });
+            } catch (err) {
+                alert("Ошибка загрузки работ: " + err.message);
             }
         }
 
+        // Вход
+        async function login() {
+            const name = document.getElementById("nameInput").value.trim();
+            const pin = document.getElementById("pinInput").value;
+
+            if (!name || !pin) {
+                alert("Заполните все поля");
+                return;
+            }
+
+            try {
+                const res = await fetch(API + "/login", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ name, pin })
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    currentUser = data.user;
+                    document.getElementById("workerName").textContent = currentUser.name;
+                    document.getElementById("loginScreen").classList.remove("active");
+                    document.getElementById("workerScreen").classList.add("active");
+                    
+                    if (currentUser.is_admin) {
+                        document.getElementById("adminButtons").classList.remove("hidden");
+                    }
+                    loadJobs();
+                } else {
+                    alert(data.message || "Ошибка входа");
+                }
+            } catch (err) {
+                alert("Ошибка подключения: " + err.message);
+            }
+        }
+
+        // Запись выработки
         async function record() {
             const job_id = document.getElementById("jobSelect").value;
             const quantity = document.getElementById("quantityInput").value;
 
-            await fetch(API + "/record", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    user_id: currentUser.id,
-                    job_id: job_id,
-                    quantity: parseInt(quantity)
-                })
-            });
-            alert("Записано!");
-            document.getElementById("quantityInput").value = "";
+            if (!job_id || !quantity) {
+                alert("Заполните все поля");
+                return;
+            }
+
+            try {
+                const res = await fetch(API + "/record", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        user_id: currentUser.id,
+                        job_id: parseInt(job_id),
+                        quantity: parseInt(quantity)
+                    })
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    alert("✅ Записано!");
+                    document.getElementById("quantityInput").value = "";
+                } else {
+                    alert("Ошибка записи");
+                }
+            } catch (err) {
+                alert("Ошибка: " + err.message);
+            }
         }
 
+        // Показать статистику
         function showStats() {
-            document.getElementById("workerScreen").classList.add("hidden");
-            document.getElementById("adminScreen").classList.add("hidden");
-            document.getElementById("statsScreen").classList.remove("hidden");
+            document.getElementById("workerScreen").classList.remove("active");
+            document.getElementById("statsScreen").classList.add("active");
             document.getElementById("startInput").value = "";
             document.getElementById("endInput").value = "";
             document.getElementById("statsList").innerHTML = "";
+            if (statsChart) statsChart.destroy();
         }
 
+        // Загрузить статистику
         async function loadStats() {
             const start = document.getElementById("startInput").value;
             const end = document.getElementById("endInput").value;
-            let url = `${API}/stats?`;
-            if (!currentUser.is_admin) {
-                url += `user_id=${currentUser.id}&`;
-            }
-            if (start) url += `start=${start}&`;
-            if (end) url += `end=${end}`;
 
-            const res = await fetch(url);
-            const stats = await res.json();
-            const list = document.getElementById("statsList");
-            list.innerHTML = "";
-            if (stats.length === 0) {
-                list.innerHTML = "<p>Нет данных</p>";
+            if (!start || !end) {
+                alert("Выберите диапазон дат");
                 return;
             }
-            stats.forEach(s => {
-                const div = document.createElement("div");
-                div.className = "item";
-                div.textContent = `${s.job} × ${s.quantity} = ${(s.rate * s.quantity).toFixed(2)} ч (${s.timestamp})`;
-                list.appendChild(div);
-            });
+
+            let url = `${API}/stats?start=${start}&end=${end}`;
+            if (!currentUser.is_admin) {
+                url += `&user_id=${currentUser.id}`;
+            }
+
+            try {
+                const res = await fetch(url);
+                const stats = await res.json();
+                const list = document.getElementById("statsList");
+                list.innerHTML = "";
+
+                if (stats.length === 0) {
+                    list.innerHTML = "<p>Нет данных за выбранный период</p>";
+                    return;
+                }
+
+                // Собираем данные для графика
+                const labels = [];
+                const hoursData = [];
+                let totalHours = 0;
+
+                stats.forEach(s => {
+                    const hours = s.rate * s.quantity;
+                    totalHours += hours;
+                    labels.push(s.job.slice(0, 20) + "...");
+                    hoursData.push(hours);
+
+                    const div = document.createElement("div");
+                    div.className = "item";
+                    div.textContent = `${s.job} × ${s.quantity} = ${hours.toFixed(2)} ч (${s.timestamp.split('T')[0]})`;
+                    list.appendChild(div);
+                });
+
+                // Создаём график
+                if (statsChart) statsChart.destroy();
+                const ctx = document.getElementById('statsChart').getContext('2d');
+                statsChart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Отработано часов',
+                            data: hoursData,
+                            backgroundColor: '#0088cc',
+                            borderColor: '#0066aa',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: {
+                            legend: { display: false },
+                            title: {
+                                display: true,
+                                text: `Общая выработка: ${totalHours.toFixed(2)} часов`
+                            }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                title: { display: true, text: 'Часы' }
+                            }
+                        }
+                    }
+                });
+            } catch (err) {
+                alert("Ошибка загрузки статистики: " + err.message);
+            }
         }
 
+        // Админ: статистика по всем
         function showAdminStats() {
             showStats();
         }
 
+        // Назад
         function back() {
-            document.getElementById("statsScreen").classList.add("hidden");
-            document.getElementById("workerScreen").classList.remove("hidden");
-            if (currentUser.is_admin) {
-                document.getElementById("adminScreen").classList.remove("hidden");
-            }
+            document.getElementById("statsScreen").classList.remove("active");
+            document.getElementById("workerScreen").classList.add("active");
         }
 
         Telegram.WebApp.ready();
